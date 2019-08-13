@@ -8,6 +8,7 @@ import xgboost as xgb
 import seaborn as sns
 import cufflinks as cf
 import matplotlib.pyplot
+from hyperopt import hp, fmin, tpe, STATUS_OK, Trials
 
 road = './bike.csv'
 
@@ -16,19 +17,21 @@ def get_data(road):
     dat.drop(['casual', 'registered'], axis = 1, inplace = True)
     return dat
 
-data = get_data(road)
+df = get_data(road)
+data = df[[col for col in df.columns if col not in ['registed', 'casual']]]
 
 
 # 特征工程
 def data_application(data):
-    data.datetime = pd.to_datetime(data.datetime)
-    data['day'] = data.datetime.apply(lambda x: x.day)
-    data['year'] = data.datetime.apply(lambda x: x.year)
-    data['hour'] = data.datetime.apply(lambda x: x.hour)
-    data['minute'] = data.datetime.apply(lambda x: x.minute)
-    data['dayofweek'] = data.datetime.apply(lambda x: x.dayofweek)
-    data['weekend'] = data.datetime.apply(lambda x: x.dayofweek in [5, 6])
-    data.drop('datetime', axis = 1, inplace = True)
+    if 'datetime' in list(data.columns):
+        data.datetime = pd.to_datetime(data.datetime)
+        data['day'] = data.datetime.apply(lambda x: x.day)
+        data['year'] = data.datetime.apply(lambda x: x.year)
+        data['hour'] = data.datetime.apply(lambda x: x.hour)
+        data['minute'] = data.datetime.apply(lambda x: x.minute)
+        data['dayofweek'] = data.datetime.apply(lambda x: x.dayofweek)
+        data['weekend'] = data.datetime.apply(lambda x: x.dayofweek in [5, 6])
+        data.drop('datetime', axis = 1, inplace = True)
 
 # 构建评价标准
 def post_pred(y_pred):
@@ -105,6 +108,44 @@ def draw_importance_features(model, data, target_variable):
 
 
 # 拟合模型
-model = xgb.XGBRegressor(objective = 'reg:squarederror')
-print('xgboost', count_prediction(data, model))
-draw_importance_features(model, data, 'count')
+#model = xgb.XGBRegressor(objective = 'reg:squarederror')
+#print('xgboost', count_prediction(data, model))
+#draw_importance_features(model, data, 'count')
+
+# 使用贝叶斯优化方法进行调参
+def objective(space)
+    model = xgb.XGBRegressor(objective = 'reg:squarederror',
+                             max_depth = int(space['max_depth']),
+                             n_estimators = int(space['n_estimators']),
+                             subsample = space['subsample'],
+                             colsample_bytree = space['colsample_bytree'],
+                             learning_rate = space['learning_rate'],
+                             reg_alpha = space['reg_alpha'])
+
+    X_train, y_train, X_test, y_test = train_test_split(data, 'count')
+    _, registered_pred = fit_and_predict(data, model, 'registered')
+    _, casual_pred = fit_and_predict(data, model, 'casual')
+
+    y_pred = registered_pred + casual_pred
+
+    score = rmsle(y_test, y_pred)
+
+    return {'loss': score, 'status': STATUS_OK}
+
+space = {
+    'max_depth': hp.quniform('x_max_depth', 2, 20, 1),
+    'n_estimators': hp.quniform('n_estimators', 100, 500, 1),
+    'subsample': hp.uniform('subsample', 0.5, 1),
+    'colsample_bytree': hp.uniform('colsample_bytree', 0.5, 1),
+    'learning_rate': hp.uniform('learning_rate', 0.01, 0.1),
+    'reg_alpha': hp.uniform('reg_alpha', 0.1, 1)
+}
+
+trials = Trials()
+best = fmin(fn = objective,
+            space = space,
+            max_evals = 15,
+            trials = trials,
+            algo = tpe.suggest)
+
+print(best)
